@@ -117,12 +117,10 @@ Loads a batch of data
 function load_batch(pairs, labels, indices; image_size=(64, 64))
     batch_size = length(indices)
     
-    # Prepare arrays
     x1 = zeros(Float32, image_size..., 1, batch_size)
     x2 = zeros(Float32, image_size..., 1, batch_size)
     y = zeros(Float32, batch_size)
     
-    # Load each image in batch
     for (i, idx) in enumerate(indices)
         img1_path, img2_path = pairs[idx]
         

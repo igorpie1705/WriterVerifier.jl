@@ -7,10 +7,10 @@ end
 
 Functors.@functor SiameseNetwork
 
+"""
+Simple CNN for extracting image features
+"""
 function create_feature_net()
-    """
-    Simple CNN for extracting image features
-    """
     return Chain(
         Conv((5, 5), 1 => 32, relu, pad=2),
         MaxPool((2, 2)),

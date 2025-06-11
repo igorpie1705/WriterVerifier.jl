@@ -17,7 +17,7 @@ using FileIO
             first_writer = first(keys(writers))
             img_path = writers[first_writer][1]
             processed = process_image(img_path);
-            @test size(processed) == (64, 64, 1)
+            @test size(processed) == (64, 128, 1)
             
             # Testing pair creation
             pairs, labels = create_pairs(writers, positive=2, negative=2)
@@ -33,8 +33,8 @@ using FileIO
         model = create_model()
         
         # Testujemy forward pass z losowymi danymi
-        x1 = rand(Float32, 64, 64, 1, 1)
-        x2 = rand(Float32, 64, 64, 1, 1)
+        x1 = rand(Float32, 64, 128, 1, 1)
+        x2 = rand(Float32, 64, 128, 1, 1)
         output = model(x1, x2)
         @test size(output) == (1,)  # Sprawdzamy wymiary wyjścia
         @test 0 <= output[1] <= 1   # Powinno być między 0 a 1
