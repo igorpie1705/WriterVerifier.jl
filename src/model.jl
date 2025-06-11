@@ -1,5 +1,5 @@
 using Flux
-using Flux: @functor
+using Functors: @functor
 
 
 struct SiameseNet
@@ -83,7 +83,7 @@ end
 
 function binary_cross_entropy_loss(ŷ, y)
     ϵ = 1f-7
-    ŷ_clipped = clamp.(ŷ, ε, 1.0f0 - ε)
+    ŷ_clipped = clamp.(ŷ, ϵ, 1.0f0 - ϵ)
     return -mean(y .* log.(ŷ_clipped) .+ (1.0f0 .- y) .* log.(1.0f0 .- ŷ_clipped))
 end
 

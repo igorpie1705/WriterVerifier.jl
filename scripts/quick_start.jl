@@ -47,7 +47,7 @@ end
 println("\n🔄 KROK 2: Tworzenie par treningowych")
 
 # Utwórz pary do treningu
-pairs, labels = create_pairs(writers_data; n_positive=100, n_negative=100)
+pairs, labels = create_pairs(writers_data; n_positive=200, n_negative=200)
 
 println("✅ Utworzono $(length(pairs)) par")
 println("   Pozytywne pary: $(sum(labels))")
@@ -102,6 +102,7 @@ try
     
 catch e
     println("   ❌ Błąd w forward pass: $e")
+    println("   Stack trace: $e")
 end
 
 # ============================================================================
@@ -112,5 +113,126 @@ println("\n🎯 KROK 4: Mini trening (test)")
 if length(pairs) >= 50
     println("Uruchamianie mini treningu z $(min(50, length(pairs))) parami...")
     
-    # Weź tylko pierwsze
+    # Weź tylko pierwsze 50 par do szybkiego testu
+    mini_pairs = pairs[1:50]
+    mini_labels = labels[1:50]
+    
+    try
+        # Trenuj przez 2 epoki z małym batch size
+        trained_model, history = train_model!(
+            model, mini_pairs, mini_labels;
+            epochs=2,
+            batch_size=8,
+            learning_rate=1e-3,
+            train_split=0.8
+        )
+        
+        println("✅ Mini trening zakończony!")
+        println("   📈 Final train loss: $(round(history["train_losses"][end], digits=4))")
+        println("   📈 Final val loss: $(round(history["val_losses"][end], digits=4))")
+        println("   🎯 Final val accuracy: $(round(history["val_accuracies"][end] * 100, digits=2))%")
+        
+        # Plot training history
+        p = plot_training_history(history)
+        savefig(p, "training_history.png")
+        println("   📊 Wykres zapisany jako training_history.png")
+        
+    catch e
+        println("   ❌ Błąd w mini treningu: $e")
+        println("   Stack trace:")
+        for (exc, bt) in Base.catch_stack()
+            showerror(stdout, exc, bt)
+            println()
+        end
+    end
+else
+    println("❌ Za mało par do treningu (potrzeba minimum 50)")
 end
+
+# ============================================================================
+# 5. TEST PREDYKCJI NA PRAWDZIWYCH DANYCH
+# ============================================================================
+println("\n🔍 KROK 5: Test predykcji")
+
+if length(pairs) >= 10
+    try
+        # Test na kilku parach
+        test_pairs = pairs[1:5]
+        test_labels = labels[1:5]
+        
+        println("Testing predictions:")
+        for i in 1:5
+            img1_path, img2_path = test_pairs[i]
+            true_label = test_labels[i]
+            
+            # Predict similarity
+            pred_similarity = predict_similarity(model, img1_path, img2_path)
+            
+            writer1 = basename(img1_path)[1:3]  # First 3 chars as writer ID
+            writer2 = basename(img2_path)[1:3]
+            
+            println("   $(i). $(writer1) vs $(writer2): pred=$(round(pred_similarity, digits=3)), true=$true_label")
+        end
+        
+    catch e
+        println("   ❌ Błąd w testowaniu predykcji: $e")
+    end
+end
+
+# ============================================================================
+# 6. ZAPISANIE MODELU
+# ============================================================================
+println("\n💾 KROK 6: Zapisywanie modelu")
+
+try
+    # Utwórz folder models jeśli nie istnieje
+    if !isdir("models")
+        mkdir("models")
+    end
+    
+    # Zapisz model
+    model_path = "models/siamese_model_test.jld2"
+    save_model(model, model_path)
+    
+    # Test ładowania
+    loaded_model = load_model(model_path)
+    println("✅ Model zapisany i załadowany pomyślnie!")
+    
+catch e
+    println("❌ Błąd przy zapisywaniu modelu: $e")
+end
+
+# ============================================================================
+# 7. PODSUMOWANIE
+# ============================================================================
+println("\n🎉 PODSUMOWANIE QUICK START")
+println("=" ^ 60)
+println("✅ Dane załadowane: $(length(writers_data)) pisarzy")
+println("✅ Pary utworzone: $(length(pairs)) par")
+println("✅ Model utworzony i przetestowany")
+println("✅ Mini trening przeprowadzony")
+println("✅ Predykcje przetestowane")
+println("✅ Model zapisany")
+
+println("\n🚀 NASTĘPNE KROKI:")
+println("1. Zwiększ liczbę par treningowych")
+println("2. Uruchom pełny trening z więcej epokami")
+println("3. Eksperymentuj z hyperparametrami")
+println("4. Dodaj więcej metryk ewaluacji")
+println("5. Zaimplementuj data augmentation")
+
+println("\n📚 PRZYKŁAD PEŁNEGO TRENINGU:")
+println("""
+# Pełny trening
+pairs, labels = create_pairs(writers_data; n_positive=2000, n_negative=2000)
+model = create_model((64, 128, 1))
+trained_model, history = train_model!(
+    model, pairs, labels;
+    epochs=20,
+    batch_size=32,
+    learning_rate=1e-3
+)
+save_model(trained_model, "models/siamese_model_full.jld2")
+""")
+
+println("\n🎯 QUICK START ZAKOŃCZONY POMYŚLNIE! 🎯")
