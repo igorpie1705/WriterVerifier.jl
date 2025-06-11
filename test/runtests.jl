@@ -8,7 +8,7 @@ using FileIO
     @testset "Data loading tests" begin
 
         test_dir = "data/test_data"
-        writers = load_images(test_dir)
+        writers = load_images(test_dir);
         println(writers)
         @test length(writers) == 1 # Should find one writer
         
@@ -16,7 +16,7 @@ using FileIO
         if length(writers) > 0
             first_writer = first(keys(writers))
             img_path = writers[first_writer][1]
-            processed = process_image(img_path)
+            processed = process_image(img_path);
             @test size(processed) == (64, 64, 1)
             
             # Testing pair creation
@@ -42,7 +42,7 @@ using FileIO
         # Test funkcji straty
         y_pred = [0.2f0, 0.8f0]
         y_true = [0.0f0, 1.0f0]
-        loss = loss_function(y_pred, y_true)
+        loss = loss_function(y_pred, y_true);
         @test loss > 0  # Strata powinna być dodatnia
     end
 
@@ -52,13 +52,13 @@ using FileIO
         test_dir = "data/test_data"
 
         writers = load_images(test_dir)
-        pairs, labels = create_pairs(writers, positive=5, negative=5)
+        pairs, labels = create_pairs(writers, positive=5, negative=5);
         
         # Tworzymy model
         model = create_model()
         
         # Testujemy ewaluację
-        val_loss, val_acc = evaluate_model(model, pairs, labels, 1:length(pairs), batch_size=2)
+        val_loss, val_acc = evaluate_model(model, pairs, labels, 1:length(pairs), batch_size=2);
         @test val_loss > 0
         @test 0 <= val_acc <= 1
         

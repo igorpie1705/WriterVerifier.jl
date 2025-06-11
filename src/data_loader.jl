@@ -1,10 +1,9 @@
 using Images, FileIO, Random
 
+"""
+Loads images from folder
+"""
 function load_images(folder_path; max_per_writer=20)
-    """
-    Loads images from folder
-    Expected naming: writer1_image1.png, writer2_image1.png etc.
-    """
     writers = Dict{String, Vector{String}}()
     
     if !isdir(folder_path)
@@ -12,11 +11,11 @@ function load_images(folder_path; max_per_writer=20)
         return writers
     end
     
-        # Find all images
+    # Find all images
     for (root, dirs, files) in walkdir(folder_path)
         for file in files
             if any(endswith(lowercase(file), ext) for ext in [".png", ".jpg", ".jpeg"])
-                full_path = joinpath(root, file)  # Użyj 'root', a nie 'folder_path'
+                full_path = joinpath(root, file)
 
                 parts = split(file, "-")
                 if length(parts) >= 2
@@ -45,20 +44,13 @@ function load_images(folder_path; max_per_writer=20)
     return writers
 end
 
+"""
+Processes single image for network input
+"""
 function process_image(path; size=(64, 64))
-    """
-    Processes single image for network input
-    """
     try
-        # Load image
         img = load(path)
-        
-        # Convert to grayscale
-        if ndims(img) > 2
-            img = Gray.(img)
-        end
-        
-        # Resize
+        img = Gray.(img)
         img = imresize(img, size)
         
         # Convert to Float32 and normalize
@@ -74,12 +66,12 @@ function process_image(path; size=(64, 64))
     end
 end
 
+"""
+Creates image pairs for training
+positive = same writer pairs (label = 1)
+negative = different writer pairs (label = 0)
+"""
 function create_pairs(writers; positive=100, negative=100)
-    """
-    Creates image pairs for training
-    positive = same writer pairs (label = 1)
-    negative = different writer pairs (label = 0)
-    """
     pairs = []
     labels = []
     
@@ -91,7 +83,7 @@ function create_pairs(writers; positive=100, negative=100)
         writer = rand(writer_list)
         if length(writers[writer]) >= 2
             img1, img2 = rand(writers[writer], 2)
-            if img1 != img2  # Not the same image
+            if img1 != img2
                 push!(pairs, (img1, img2))
                 push!(labels, 1)
             end
@@ -119,10 +111,10 @@ function create_pairs(writers; positive=100, negative=100)
     return pairs, labels
 end
 
+"""
+Loads a batch of data
+"""
 function load_batch(pairs, labels, indices; image_size=(64, 64))
-    """
-    Loads a batch of data
-    """
     batch_size = length(indices)
     
     # Prepare arrays
