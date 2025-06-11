@@ -1,13 +1,13 @@
 using Flux
 using Functors
 # Siamese model structure
-struct SimpleSiamese
+struct SiameseNetwork
     feature_net      # CNN for feature extraction
     similarity_net   # Network for calculating similarity
 end
 
 # Tell Flux to treat our struct as a model
-Functors.@functor SimpleSiamese
+Functors.@functor SiameseNetwork
 
 function create_feature_net()
     """
@@ -55,11 +55,11 @@ function create_model()
     feature_net = create_feature_net()
     similarity_net = create_similarity_net()
     
-    return SimpleSiamese(feature_net, similarity_net)
+    return SiameseNetwork(feature_net, similarity_net)
 end
 
 # How the model should work
-function (model::SimpleSiamese)(x1, x2)
+function (model::SiameseNetwork)(x1, x2)
     """
     Model forward pass:
     1. Extract features from both images
@@ -87,29 +87,4 @@ function loss_function(y_pred, y_true)
     y_pred = clamp.(y_pred, epsilon, 1.0f0 - epsilon)
     
     return -mean(y_true .* log.(y_pred) .+ (1.0f0 .- y_true) .* log.(1.0f0 .- y_pred))
-end
-
-function test_model(model)
-    """
-    Quick test to check if model works
-    """
-    println("Testing model...")
-    
-    # Create sample data
-    x1 = randn(Float32, 64, 64, 1, 2)  # 2 images 64x64
-    x2 = randn(Float32, 64, 64, 1, 2)
-    
-    # Test forward pass
-    output = model(x1, x2)
-    
-    println("Output shape: $(size(output))")
-    println("Values: $(round.(output, digits=3))")
-    println("Range: [$(round(minimum(output), digits=3)), $(round(maximum(output), digits=3))]")
-    
-    # Test loss function
-    y_true = Float32[1, 0]
-    loss = loss_function(output, y_true)
-    println("Loss: $(round(loss, digits=4))")
-    
-    return true
 end

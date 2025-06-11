@@ -1,8 +1,8 @@
 module WriterVerifier
 
 # Export all necessary functions
-export load_images, process_image, create_pairs, load_batch, SimpleSiamese
-export create_feature_net, create_similarity_net, create_model, loss_function, test_model
+export load_images, process_image, create_pairs, load_batch, SiameseNetwork
+export create_feature_net, create_similarity_net, create_model, loss_function
 export train_model!, evaluate_model, test_similarity, save_model, load_model
 
 

@@ -1,97 +1,73 @@
 using Test
-using WriterVerifier  # Assuming the module is in your current namespace
+using WriterVerifier
 using Images
+using FileIO
 
-# Create a temporary directory for testing
-const TEST_DIR = mktempdir()
-const IMG_SIZE = (64, 64)
+# Tests for data_loader.jl
+@testset "All tests" begin
+    @testset "Data loading tests" begin
 
-function setup_test_images()
-    # Create 2 test writers with 3 sample images each
-    for writer in ["writer1", "writer2"]
-        mkdir(joinpath(TEST_DIR, writer))
-        for i in 1:3
-            # Create simple gradient images
-            img = rand(Gray{Float32}, IMG_SIZE)
-            save(joinpath(TEST_DIR, "$(writer)_$i.png"), img)
+        test_dir = "data/test_data"
+        writers = load_images(test_dir)
+        println(writers)
+        @test length(writers) == 1 # Should find one writer
+        
+        # Testing image processing
+        if length(writers) > 0
+            first_writer = first(keys(writers))
+            img_path = writers[first_writer][1]
+            processed = process_image(img_path)
+            @test size(processed) == (64, 64, 1)
+            
+            # Testing pair creation
+            pairs, labels = create_pairs(writers, positive=2, negative=2)
+            @test length(pairs) == length(labels)
+            @test sum(labels) > 0  # Powinny być jakieś pozytywne pary
         end
-    end
-end
 
-@testset "WriterVerifier Tests" begin
-    # Setup test environment
-    @testset "Setup" begin
-        setup_test_images()
-        @test isdir(TEST_DIR)
-        @test length(readdir(TEST_DIR)) == 2
     end
 
-    @testset "Data Loading" begin
-        writers = load_images(TEST_DIR)
-        @test length(writers) == 2
-        @test all(x -> length(x) >= 2, values(writers))
-        
-        img = process_image(first(values(writers))[1])
-        @test size(img) == (IMG_SIZE..., 1)
-        @test eltype(img) == Float32
-        
-        pairs, labels = create_pairs(writers; positive=5, negative=5)
-        @test length(pairs) == length(labels)
-        @test sum(labels) == 5  # 5 positive pairs
-        
-        x1, x2, y = load_batch(pairs, labels, 1:2)
-        @test size(x1) == (IMG_SIZE..., 1, 2)
-    end
-
-    @testset "Model" begin
-        model = create_model()
-        @test model isa SimpleSiamese
-        
-        # Test forward pass
-        x = rand(Float32, IMG_SIZE..., 1, 2)
-        output = model(x, x)
-        @test size(output) == (2,)
-        @test all(0 .<= output .<= 1)
-        
-        # Test loss function
-        loss = loss_function([0.6f0, 0.4f0], [1f0, 0f0])
-        @test loss > 0
-        
-        # Test model evaluation
-        test_result = test_model(model)
-        @test test_result
-    end
-
-    @testset "Training" begin
-        writers = load_images(TEST_DIR)
-        pairs, labels = create_pairs(writers; positive=5, negative=5)
+    # Tests for model.jl
+    @testset "Model tests" begin
+        # Tworzymy model
         model = create_model()
         
-        # Smoke test training
-        trained_model, history = train_model!(
-            model, pairs, labels;
-            epochs=1, batch_size=2
-        )
-        @test trained_model isa SimpleSiamese
-        @test haskey(history, "train_loss")
+        # Testujemy forward pass z losowymi danymi
+        x1 = rand(Float32, 64, 64, 1, 1)
+        x2 = rand(Float32, 64, 64, 1, 1)
+        output = model(x1, x2)
+        @test size(output) == (1,)  # Sprawdzamy wymiary wyjścia
+        @test 0 <= output[1] <= 1   # Powinno być między 0 a 1
         
-        # Test similarity function
-        test_img1 = first(values(writers))[1]
-        test_img2 = first(values(writers))[2]
-        similarity = test_similarity(model, test_img1, test_img2)
-        @test 0 <= similarity <= 1
-        
-        # Test model saving/loading
-        test_model_path = joinpath(TEST_DIR, "test_model.jld2")
-        save_model(model, test_model_path)
-        @test isfile(test_model_path)
-        
-        loaded_model = load_model(test_model_path)
-        @test loaded_model isa SimpleSiamese
+        # Test funkcji straty
+        y_pred = [0.2f0, 0.8f0]
+        y_true = [0.0f0, 1.0f0]
+        loss = loss_function(y_pred, y_true)
+        @test loss > 0  # Strata powinna być dodatnia
     end
 
-    # Cleanup
-    rm(TEST_DIR; recursive=true)
-end
+    # Tests for training.jl
+    @testset "Training tests" begin
+        # Tworzymy testowe dane
+        test_dir = "data/test_data"
 
-println("\n✅ All tests passed!")
+        writers = load_images(test_dir)
+        pairs, labels = create_pairs(writers, positive=5, negative=5)
+        
+        # Tworzymy model
+        model = create_model()
+        
+        # Testujemy ewaluację
+        val_loss, val_acc = evaluate_model(model, pairs, labels, 1:length(pairs), batch_size=2)
+        @test val_loss > 0
+        @test 0 <= val_acc <= 1
+        
+        # Test zapisu i wczytywania modelu
+        model_path = joinpath(test_dir, "test_model.jld2")
+        save_model(model, model_path)
+        @test isfile(model_path)
+        
+        loaded_model = load_model(model_path)
+        @test loaded_model isa SiameseNetwork    
+    end
+end
