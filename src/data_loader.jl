@@ -1,141 +1,143 @@
-using Images, FileIO, MLUtils, Random
+using Images, FileIO, Random
 
-"""
-Ładuje i przetwarza dane z IAM Words Dataset
-"""
-function load_iam_data(data_path::String; max_samples_per_writer=50)
-    image_files = []
-    for (root, dirs, files) in walkdir(data_path)
+function load_images(folder_path; max_per_writer=20)
+    """
+    Loads images from folder
+    Expected naming: writer1_image1.png, writer2_image1.png etc.
+    """
+    writers = Dict{String, Vector{String}}()
+    
+    if !isdir(folder_path)
+        println("Folder $folder_path doesn't exist!")
+        return writers
+    end
+    
+        # Find all images
+    for (root, dirs, files) in walkdir(folder_path)
         for file in files
-            if any(s -> endswith(lowercase(file), s), [".png", ".jpg", ".jpeg", ".tif", ".tiff"])
-                push!(image_files, joinpath(root, file))
+            if any(endswith(lowercase(file), ext) for ext in [".png", ".jpg", ".jpeg"])
+                full_path = joinpath(root, file)  # Użyj 'root', a nie 'folder_path'
+
+                parts = split(file, "-")
+                if length(parts) >= 2
+                    writer = parts[1]
+
+                    if !haskey(writers, writer)
+                        writers[writer] = String[]
+                    end
+
+                    if length(writers[writer]) < max_per_writer
+                        push!(writers[writer], full_path)
+                    end
+                end
             end
         end
     end
-
-    println("Znaleziono $(length(image_files)) obrazów")
-
-    writers_data = Dict{String, Vector{String}}()
-
-    for img_path in image_files
-        filename = basename(img_path)
-        
-        # Poprawione parsowanie - IAM ma format: writer-session-word.png
-        writer_match = match(r"^([a-zA-Z0-9]+)-", filename)
-        
-        if writer_match !== nothing
-            writer_id = writer_match.captures[1]
-            
-            if !haskey(writers_data, writer_id)
-                writers_data[writer_id] = String[]
-            end
-            
-            if length(writers_data[writer_id]) < max_samples_per_writer
-                push!(writers_data[writer_id], img_path)
-            end
-        end
+    
+    # Remove writers with less than 2 images
+    writers = filter(p -> length(p.second) >= 2, writers)
+    
+    println("Loaded $(length(writers)) writers")
+    for (writer, images) in writers
+        println("$writer: $(length(images)) images")
     end
-
-    # Filtruj pisarzy z wystarczającą liczbą próbek
-    min_samples = 5
-    writers_data = filter(p -> length(p.second) >= min_samples, writers_data)
-
-    total_samples = sum(length(samples) for samples in values(writers_data))
-    println("Załadowano $(length(writers_data)) pisarzy z $(total_samples) próbkami")
-    println("Średnio $(round(total_samples/length(writers_data), digits=1)) próbek na pisarza")
-
-    return writers_data
+    
+    return writers
 end
 
-function preprocess_image(img_path::String; target_size=(64, 128))
+function process_image(path; size=(64, 64))
+    """
+    Processes single image for network input
+    """
     try
-        img = load(img_path)
+        # Load image
+        img = load(path)
         
-        # Konwersja do skali szarości
-        if ndims(img) == 3 || eltype(img) <: RGB
+        # Convert to grayscale
+        if ndims(img) > 2
             img = Gray.(img)
         end
         
+        # Resize
+        img = imresize(img, size)
+        
+        # Convert to Float32 and normalize
         img = Float32.(img)
+        img = 2.0f0 * img .- 1.0f0  # Normalize to [-1, 1]
         
-        # Resize z zachowaniem proporcji
-        img_resized = imresize(img, target_size)
-        
-        # Normalizacja do [-1, 1]
-        img_normalized = 2.0f0 * img_resized .- 1.0f0
-        
-        return reshape(img_normalized, size(img_normalized)..., 1)
+        # Add channel dimension
+        return reshape(img, size..., 1)
         
     catch e
-        @warn "Błąd przy przetwarzaniu $img_path: $e"
-        return zeros(Float32, target_size..., 1)
+        @warn "Error processing $path: $e"
+        return zeros(Float32, size..., 1)
     end
 end
 
-function create_pairs(writers_data::Dict{String, Vector{String}};
-                      n_positive=1000, n_negative=1000)
-    pairs = Tuple{String, String}[]
-    labels = Int[]
+function create_pairs(writers; positive=100, negative=100)
+    """
+    Creates image pairs for training
+    positive = same writer pairs (label = 1)
+    negative = different writer pairs (label = 0)
+    """
+    pairs = []
+    labels = []
     
-    writers = collect(keys(writers_data))
+    writer_list = collect(keys(writers))
     
-    # Pozytywne pary (ten sam pisarz)
-    positive_count = 0
-    max_attempts = n_positive * 10  # Zabezpieczenie przed nieskończoną pętlą
-    attempts = 0
-    
-    while positive_count < n_positive && attempts < max_attempts
-        writer = rand(writers)
-        writer_images = writers_data[writer]
-        
-        if length(writer_images) >= 2
-            img1, img2 = rand(writer_images, 2)
-            # Upewnij się, że to nie są te same obrazy
-            if img1 != img2
+    # Positive pairs (same writer)
+    println("Creating positive pairs...")
+    for _ in 1:positive
+        writer = rand(writer_list)
+        if length(writers[writer]) >= 2
+            img1, img2 = rand(writers[writer], 2)
+            if img1 != img2  # Not the same image
                 push!(pairs, (img1, img2))
                 push!(labels, 1)
-                positive_count += 1
             end
         end
-        attempts += 1
     end
     
-    # Negatywne pary (różni pisarze)
-    negative_count = 0
-    attempts = 0
-    max_attempts = n_negative * 10
-    
-    while negative_count < n_negative && attempts < max_attempts
-        writer1, writer2 = rand(writers, 2)
-        if writer1 != writer2
-            img1 = rand(writers_data[writer1])
-            img2 = rand(writers_data[writer2])
-            push!(pairs, (img1, img2))
-            push!(labels, 0)
-            negative_count += 1
+    # Negative pairs (different writers)
+    println("Creating negative pairs...")
+    for _ in 1:negative
+        if length(writer_list) >= 2
+            writer1, writer2 = rand(writer_list, 2)
+            if writer1 != writer2
+                img1 = rand(writers[writer1])
+                img2 = rand(writers[writer2])
+                push!(pairs, (img1, img2))
+                push!(labels, 0)
+            end
         end
-        attempts += 1
     end
     
-    println("Utworzono $(length(pairs)) par ($(positive_count) pozytywnych, $(negative_count) negatywnych)")
+    println("Created $(length(pairs)) pairs")
+    println("Positive: $(sum(labels))")
+    println("Negative: $(length(labels) - sum(labels))")
     
     return pairs, labels
 end
 
-function load_batch(pairs, labels, batch_indices; target_size=(64, 128))
-    batch_size = length(batch_indices)  # POPRAWKA: definicja batch_size
+function load_batch(pairs, labels, indices; image_size=(64, 64))
+    """
+    Loads a batch of data
+    """
+    batch_size = length(indices)
     
-    batch_x1 = zeros(Float32, target_size..., 1, batch_size)
-    batch_x2 = zeros(Float32, target_size..., 1, batch_size)
-    batch_y = zeros(Float32, batch_size)
+    # Prepare arrays
+    x1 = zeros(Float32, image_size..., 1, batch_size)
+    x2 = zeros(Float32, image_size..., 1, batch_size)
+    y = zeros(Float32, batch_size)
     
-    for (i, idx) in enumerate(batch_indices)
+    # Load each image in batch
+    for (i, idx) in enumerate(indices)
         img1_path, img2_path = pairs[idx]
         
-        batch_x1[:, :, :, i] = preprocess_image(img1_path; target_size=target_size)
-        batch_x2[:, :, :, i] = preprocess_image(img2_path; target_size=target_size)
-        batch_y[i] = Float32(labels[idx])
+        x1[:, :, :, i] = process_image(img1_path; size=image_size)
+        x2[:, :, :, i] = process_image(img2_path; size=image_size)
+        y[i] = Float32(labels[idx])
     end
     
-    return batch_x1, batch_x2, batch_y
+    return x1, x2, y
 end

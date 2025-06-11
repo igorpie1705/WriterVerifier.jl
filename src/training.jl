@@ -1,178 +1,165 @@
 using Flux
-using Flux: train!
-using ProgressMeter
 using Random
 using Statistics
 using JLD2
 
 
-
 function train_model!(model, pairs, labels; 
-                     epochs=10, 
-                     batch_size=32,
-                     learning_rate=1e-3,
-                     train_split=0.8,
-                     target_size=(64, 128),
-                     loss_fn=binary_cross_entropy_loss,
-                     device=cpu)
+                      epochs=5, 
+                      batch_size=16,
+                      learning_rate=0.001)
     """
-    Trenuje model Siamese Network
+    Simple training function - without unnecessary complications
+    """
+    println("Starting training...")
     
-    Args:
-        model: SiameseNet model
-        pairs: lista par obrazów
-        labels: labels (1 = ten sam pisarz, 0 = różni pisarze)
-        epochs: liczba epok
-        batch_size: rozmiar batcha
-        learning_rate: learning rate
-        train_split: proporcja danych do treningu
-        target_size: rozmiar obrazów (H, W)
-        loss_fn: funkcja straty
-        device: cpu lub gpu
-    """
-
-    n_samples = length(pairs)
-    n_train = round(Int, n_samples * train_split)
-
-    indices = shuffle(1:n_samples)
-    train_indices = indices[1:n_train]
-    val_indices = indices[n_train+1:end]
-
-    model = model |> device
-
-    optimizer = Adam(learning_rate)
-
-    train_losses = Float32[]
-    val_losses = Float32[]
-    val_accuracies = Float32[]
-
+    # Split data into training and validation
+    n_total = length(pairs)
+    n_train = round(Int, n_total * 0.8)
+    
+    indices = shuffle(1:n_total)
+    train_idx = indices[1:n_train]
+    val_idx = indices[n_train+1:end]
+    
+    println("Training data: $n_train")
+    println("Validation data: $(length(val_idx))")
+    
+    # Prepare optimizer
+    optim = Adam(learning_rate)
+    opt_state = Flux.setup(optim, model)
+    
+    # Training history
+    train_history = Float32[]
+    val_history = Float32[]
+    acc_history = Float32[]
+    
+    # Main training loop
     for epoch in 1:epochs
-
-        model = train_mode!(model)
-        train_loss = 0.0f0
-        n_train_batches = 0
-
-        train_batch_indices = shuffle(train_indices)
-
-        @showprogress desc="Training" for i in 1:batch_size:length(train_batch_indices)
-            batch_end = min(i + batch_size - 1, length(train_batch_indices))
-            batch_idx = train_batch_indices[i:batch_end]
-
-            x1, x2, y = load_batch(pairs, labels, batch_idx; target_size=target_size)
-            x1, x2, y = x1 |> device, x2 |> device, y |> device
-
+        println("\nEpoch $epoch/$epochs")
+        
+        # === TRAINING ===
+        Flux.trainmode!(model)
+        train_losses = Float32[]
+        
+        # Shuffle training data
+        shuffled_train = shuffle(train_idx)
+        
+        # Train in batches
+        for i in 1:batch_size:length(shuffled_train)
+            # Determine batch range
+            end_idx = min(i + batch_size - 1, length(shuffled_train))
+            batch_idx = shuffled_train[i:end_idx]
+            
+            # Load batch
+            x1, x2, y = load_batch(pairs, labels, batch_idx)
+            
+            # Compute gradients and loss
             loss, grads = Flux.withgradient(model) do m
-                ŷ = m(x1, x2)
-                loss_fn(ŷ, y)
+                y_pred = m(x1, x2)
+                loss_function(y_pred, y)
             end
-
-            Flux.update!(optimizer, model, grads[1])
-
-            train_loss += loss
-            n_train_batches += 1
+            
+            # Update weights
+            Flux.update!(opt_state, model, grads[1])
+            
+            push!(train_losses, loss)
         end
-
-        avg_train_loss = train_loss / n_train_batches
-        push!(train_losses, avg_train_loss)
-
-        model = eval_mode!(model)
-        val_loss, val_acc = validate_model(model, pairs, labels, val_indices;
-                                        batch_size=batch_size,
-                                        target_size=target_size,
-                                        loss_fn=loss_fn,
-                                        device=device)
-        push!(val_losses, val_loss)
-        push!(val_accuracies, val_acc)
-
-
+        
+        # === VALIDATION ===
+        Flux.testmode!(model)
+        val_loss, val_acc = evaluate_model(model, pairs, labels, val_idx)
+        
+        # Save history
+        push!(train_history, mean(train_losses))
+        push!(val_history, val_loss)
+        push!(acc_history, val_acc)
+        
+        # Display results
+        println("Train loss: $(round(mean(train_losses), digits=4))")
+        println("Val loss: $(round(val_loss, digits=4))")
+        println("Val accuracy: $(round(val_acc * 100, digits=1))%")
     end
-
+    
+    println("\nTraining completed!")
+    
     history = Dict(
-        "train_losses" => train_losses,
-        "val_losses" => val_losses,
-        "val_accuracies" => val_accuracies
+        "train_loss" => train_history,
+        "val_loss" => val_history,
+        "val_acc" => acc_history
     )
-
-    return model |> cpu, history
+    
+    return model, history
 end
 
-
-function validate_model(model, pairs, labels, val_indices;
-                       batch_size=32, 
-                       target_size=(64, 128),
-                       loss_fn=binary_cross_entropy_loss,
-                       device=cpu)
-"""
-Walidacja modelu
-"""
-    total_loss = 0.0f0
-    total_correct = 0
-    total_samples = 0
-    n_batches = 0
-
-    for i in 1:batch_size:length(val_indices)
-        batch_end = min(i + batch_size - 1, length(val_indices))
-        batch_idx = val_indices[i:batch_end]
-
-        x1, x2, y = load_batch(pairs, labels, batch_idx; target_size=target_size)
-        x1, x2, y = x1 |> device, x2 |> device, y |> device
-
-
-        ŷ = model(x1, x2)
-
-        loss = loss_fn(ŷ, y)
-        total_loss += loss
-
-        predictions = ŷ .> 0.5f0  # threshold dla binary classification
-        correct = sum(predictions .== (y .> 0.5f0))
-        total_correct += correct
-        total_samples += length(y)
-        n_batches += 1
+function evaluate_model(model, pairs, labels, val_idx; batch_size=32)
+    """
+    Evaluates model on validation data
+    """
+    losses = Float32[]
+    correct = 0
+    total = 0
+    
+    for i in 1:batch_size:length(val_idx)
+        end_idx = min(i + batch_size - 1, length(val_idx))
+        batch_idx = val_idx[i:end_idx]
+        
+        # Load batch
+        x1, x2, y = load_batch(pairs, labels, batch_idx)
+        
+        # Prediction
+        y_pred = model(x1, x2)
+        
+        # Loss
+        loss = loss_function(y_pred, y)
+        push!(losses, loss)
+        
+        # Accuracy
+        predictions = y_pred .> 0.5f0
+        truth = y .> 0.5f0
+        correct += sum(predictions .== truth)
+        total += length(y)
     end
-
-    avg_loss = total_loss / n_batches
-    accuracy = total_correct / total_samples
-
-    return avg_loss, accuracy
+    
+    return mean(losses), correct / total
 end
 
-function train_mode!(model)
-    Flux.trainmode!(model)
-    return model
-end
-
-function eval_mode!(model)
-    Flux.testmode!(model)
-    return model
-end
-
-function save_model(model, filepath::String)
-    @save filepath model
-    println("Model saved to $filepath")
-end
-
-function load_model(filepath::String)
-    @load filepath model
-    println("Model loaded from $filepath")
-    return model 
-end
-
-function plot_training_history(history)
+function test_similarity(model, path1, path2)
     """
-    Draws training plot
+    Tests similarity between two images
     """
-    epochs = 1:length(history["train_losses"])
+    try
+        # Process images
+        img1 = process_image(path1)
+        img2 = process_image(path2)
+        
+        # Add batch dimension
+        x1 = reshape(img1, size(img1)..., 1)
+        x2 = reshape(img2, size(img2)..., 1)
+        
+        # Prediction
+        Flux.testmode!(model)
+        similarity = model(x1, x2)[1]
+        
+        return Float32(similarity)
+    catch e
+        @warn "Error in testing: $e"
+        return 0.0f0
+    end
+end
 
-    p1 = plot(epochs, history["train_losses"], label="Train Loss", lw=2)
-    plot!(p1, epochs, history["val_losses"], label="Val Loss", lw=2)
-    xlabel!(p1, "Epoch")
-    ylabel!(p1, "Loss")
-    title!(p1, "Training and Validation Loss")
+function save_model(model, path)
+    """
+    Saves model to file
+    """
+    @save path model
+    println("Model saved: $path")
+end
 
-    p2 = plot(epochs, history["val_accuracies"] .* 100, label="Val Accuracy", lw=2, color=:green)
-    xlabel!(p2, "Epoch")
-    ylabel!(p2, "Accuracy (%)")
-    title!(p2, "Validation Accuracy")
-
-    return plot(p1, p2, layout=(2, 1), size=(800, 600))
+function load_model(path)
+    """
+    Loads model from file
+    """
+    @load path model
+    println("Model loaded: $path")
+    return model
 end
