@@ -37,9 +37,6 @@ function load_images(folder_path; max_per_writer=20)
     writers = filter(p -> length(p.second) >= 2, writers)
     
     println("Loaded $(length(writers)) writers")
-    for (writer, images) in writers
-        println("$writer: $(length(images)) images")
-    end
     
     return writers
 end
