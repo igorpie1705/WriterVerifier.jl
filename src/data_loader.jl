@@ -3,15 +3,14 @@ using Images, FileIO, Random
 """
 Loads images from folder
 """
-function load_images(folder_path; max_per_writer=20)
+function load_images(folder_path; max_per_writer=20, max_writers=5)
     writers = Dict{String, Vector{String}}()
-    
+
     if !isdir(folder_path)
         println("Folder $folder_path doesn't exist!")
         return writers
     end
-    
-    # Find all images
+
     for (root, dirs, files) in walkdir(folder_path)
         for file in files
             if any(endswith(lowercase(file), ext) for ext in [".png", ".jpg", ".jpeg"])
@@ -20,6 +19,10 @@ function load_images(folder_path; max_per_writer=20)
                 parts = split(file, "-")
                 if length(parts) >= 2
                     writer = parts[1]
+
+                    if !haskey(writers, writer) && length(writers) >= max_writers
+                        continue
+                    end
 
                     if !haskey(writers, writer)
                         writers[writer] = String[]
@@ -32,19 +35,15 @@ function load_images(folder_path; max_per_writer=20)
             end
         end
     end
-    
-    # Remove writers with less than 2 images
-    writers = filter(p -> length(p.second) >= 2, writers)
-    
-    println("Loaded $(length(writers)) writers")
-    
+
     return writers
 end
+
 
 """
 Processes single image for network input
 """
-function process_image(path; size=(64, 64))
+function process_image(path; size=(64, 128))
     try
         img = load(path)
         img = Gray.(img)
@@ -76,6 +75,7 @@ function create_pairs(writers; positive=100, negative=100)
     
     # Positive pairs (same writer)
     println("Creating positive pairs...")
+    pos_count = 0
     for _ in 1:positive
         writer = rand(writer_list)
         if length(writers[writer]) >= 2
@@ -83,13 +83,16 @@ function create_pairs(writers; positive=100, negative=100)
             if img1 != img2
                 push!(pairs, (img1, img2))
                 push!(labels, 1)
+                pos_count += 1
             end
         end
     end
     
-    # Negative pairs (different writers)
+    # Negative pairs (different writer)
     println("Creating negative pairs...")
-    for _ in 1:negative
+    neg_count = 0
+    attempts = 0
+    while neg_count < pos_count && attempts < pos_count * 10
         if length(writer_list) >= 2
             writer1, writer2 = rand(writer_list, 2)
             if writer1 != writer2
@@ -97,8 +100,10 @@ function create_pairs(writers; positive=100, negative=100)
                 img2 = rand(writers[writer2])
                 push!(pairs, (img1, img2))
                 push!(labels, 0)
+                neg_count += 1
             end
         end
+        attempts += 1
     end
     
     println("Created $(length(pairs)) pairs")
@@ -111,7 +116,7 @@ end
 """
 Loads a batch of data
 """
-function load_batch(pairs, labels, indices; image_size=(64, 64))
+function load_batch(pairs, labels, indices; image_size=(64, 128))
     batch_size = length(indices)
     
     x1 = zeros(Float32, image_size..., 1, batch_size)

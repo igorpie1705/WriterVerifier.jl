@@ -23,7 +23,7 @@ function create_feature_net()
         
         Flux.flatten,
         
-        Dense(128 * 8 * 8, 256, relu),
+        Dense(128 * 8 * 16, 256, relu),
         Dropout(0.5),
         Dense(256, 128)
     )
